@@ -7,15 +7,32 @@ const int GRID_SIZE = 15;
 const float TILE_SIZE = 4.0f;
 const float GAME_TIME = 180.0f;
 
-// ... (Struct และ Enum เหมือนเดิม) ...
 enum TileType { EMPTY, WALL_STEEL, WALL_WOOD };
 enum Owner { NONE, PLAYER1, PLAYER2 };
 struct Tile { TileType type; Owner owner; };
 struct Bomb { Vector2 pos; Owner creator; };
 struct Player { Vector3 position; Color color; Owner id; float stunTimer; int score; };
 
+// --- Global Variables ---
 Tile map[GRID_SIZE][GRID_SIZE];
 std::vector<Bomb> bombs;
+std::vector<Player*> playerPtrs; // ย้ายมาเป็น Global เพื่อให้ ExecuteExplosion เข้าถึงได้
+
+// ฟังก์ชันช่วยวาดแผ่นสี่เหลี่ยมที่มี Texture ในโลก 3D (เสถียรกว่า DrawCubeTexture)
+void DrawPlaneTexture(Texture2D texture, Vector3 center, float width, float length, Color color) {
+    float x = center.x; float y = center.y; float z = center.z;
+    float w2 = width / 2.0f; float l2 = length / 2.0f;
+    rlSetTexture(texture.id);
+    rlBegin(RL_QUADS);
+    rlColor4ub(color.r, color.g, color.b, color.a);
+    rlNormal3f(0.0f, 1.0f, 0.0f);
+    rlTexCoord2f(0.0f, 0.0f); rlVertex3f(x - w2, y, z - l2);
+    rlTexCoord2f(0.0f, 1.0f); rlVertex3f(x - w2, y, z + l2);
+    rlTexCoord2f(1.0f, 1.0f); rlVertex3f(x + w2, y, z + l2);
+    rlTexCoord2f(1.0f, 0.0f); rlVertex3f(x + w2, y, z - l2);
+    rlEnd();
+    rlSetTexture(0);
+}
 
 void InitMap() {
     for (int x = 0; x < GRID_SIZE; x++) {
@@ -30,7 +47,7 @@ void InitMap() {
     map[GRID_SIZE - 2][GRID_SIZE - 2].type = map[GRID_SIZE - 2][GRID_SIZE - 3].type = map[GRID_SIZE - 3][GRID_SIZE - 2].type = EMPTY;
 }
 
-void ExecuteExplosion(int bx, int by, Owner owner, std::vector<Player*>& players) {
+void ExecuteExplosion(int bx, int by, Owner owner) {
     int range = 3;
     int dx[] = { 0, 0, 1, -1 };
     int dz[] = { 1, -1, 0, 0 };
@@ -41,11 +58,15 @@ void ExecuteExplosion(int bx, int by, Owner owner, std::vector<Player*>& players
             int nz = by + dz[i] * r;
             if (nx < 0 || nx >= GRID_SIZE || nz < 0 || nz >= GRID_SIZE) break;
             if (map[nx][nz].type == WALL_STEEL) break;
+
             map[nx][nz].owner = owner;
-            for (auto& p : players) {
+            // เช็คการโดนระเบิดของ Player ทุกคน
+            for (auto& p : playerPtrs) {
                 int px = (int)((p->position.x + TILE_SIZE / 2) / TILE_SIZE);
                 int pz = (int)((p->position.z + TILE_SIZE / 2) / TILE_SIZE);
-                if (px == nx && pz == nz) { if (p->id != owner) p->stunTimer = 2.0f; }
+                if (px == nx && pz == nz) {
+                    if (p->id != owner) p->stunTimer = 2.0f;
+                }
             }
             if (map[nx][nz].type == WALL_WOOD) { map[nx][nz].type = EMPTY; break; }
         }
@@ -53,18 +74,23 @@ void ExecuteExplosion(int bx, int by, Owner owner, std::vector<Player*>& players
 }
 
 int main() {
-    // 1. ตั้งค่า Full Screen
     SetConfigFlags(FLAG_FULLSCREEN_MODE);
-    InitWindow(0, 0, "Remote Paint Bomber - Auto Scale"); // ใส่ 0, 0 เพื่อเอาความละเอียดสูงสุดของจอ
+    InitWindow(0, 0, "Remote Paint Bomber - Final Version");
     SetTargetFPS(60);
     InitMap();
 
     Texture2D p1Tex = LoadTexture("picture/dog.png");
     Texture2D p2Tex = LoadTexture("picture/cat.png");
+    Texture2D metalTex = LoadTexture("picture/metal.png");
+    Texture2D woodTex = LoadTexture("picture/wood.png");
+    Texture2D bombTex = LoadTexture("picture/bomb.png");
 
     Player p1 = { { TILE_SIZE, 0.0f, TILE_SIZE }, BLUE, PLAYER1, 0, 0 };
     Player p2 = { { (GRID_SIZE - 2) * TILE_SIZE, 0.0f, (GRID_SIZE - 2) * TILE_SIZE }, RED, PLAYER2, 0, 0 };
-    std::vector<Player*> playerPtrs = { &p1, &p2 };
+
+    // ใส่ที่อยู่ของ Player เข้าไปใน Global Vector
+    playerPtrs.push_back(&p1);
+    playerPtrs.push_back(&p2);
 
     Camera camera = { 0 };
     float mapMid = ((GRID_SIZE - 1) * TILE_SIZE) / 2.0f;
@@ -79,36 +105,33 @@ int main() {
         float dt = GetFrameTime();
         if (remainingTime > 0) remainingTime -= dt;
 
-        // 2. ปรับ fovy ของกล้องให้สัมพันธ์กับความกว้างจอเสมอ (กันขอบขาว)
-        // สูตรคือ: ยิ่งจอแนวกว้าง (Aspect Ratio เยอะ) fovy ต้องปรับตามเพื่อให้แผนที่เต็มจอ
-        camera.fovy = (float)GRID_SIZE * TILE_SIZE * ((float)GetScreenHeight() / GetScreenWidth()) * 1.2f;
-        if (camera.fovy < 60.0f) camera.fovy = 65.0f; // Limit ขั้นต่ำ
+        camera.fovy = (float)GRID_SIZE * TILE_SIZE * ((float)GetScreenHeight() / GetScreenWidth()) * 1.7f;
 
         auto UpdatePlayer = [&](Player& p, int up, int down, int left, int right, int place, int detonate) {
             if (p.stunTimer > 0) { p.stunTimer -= dt; return; }
             Vector3 move = { 0 };
-            if (IsKeyDown(up)) move.z = -1;
-            if (IsKeyDown(down)) move.z = 1;
-            if (IsKeyDown(left)) move.x = -1;
-            if (IsKeyDown(right)) move.x = 1;
+            if (IsKeyDown(up)) move.z = -1; if (IsKeyDown(down)) move.z = 1;
+            if (IsKeyDown(left)) move.x = -1; if (IsKeyDown(right)) move.x = 1;
 
             if (Vector3Length(move) > 0) {
                 move = Vector3Scale(Vector3Normalize(move), TILE_SIZE * 0.07f);
                 float radius = TILE_SIZE * 0.35f;
-                Vector3 nextPosX = p.position; nextPosX.x += move.x;
-                int gx1 = (int)((nextPosX.x - radius + TILE_SIZE / 2) / TILE_SIZE);
-                int gx2 = (int)((nextPosX.x + radius + TILE_SIZE / 2) / TILE_SIZE);
+                Vector3 nX = p.position; nX.x += move.x;
+                int gx1 = (int)((nX.x - radius + TILE_SIZE / 2) / TILE_SIZE);
+                int gx2 = (int)((nX.x + radius + TILE_SIZE / 2) / TILE_SIZE);
                 int gz = (int)((p.position.z + TILE_SIZE / 2) / TILE_SIZE);
-                if (gx1 >= 0 && gx2 < GRID_SIZE && map[gx1][gz].type == EMPTY && map[gx2][gz].type == EMPTY) p.position.x = nextPosX.x;
-                Vector3 nextPosZ = p.position; nextPosZ.z += move.z;
-                int gz1 = (int)((nextPosZ.z - radius + TILE_SIZE / 2) / TILE_SIZE);
-                int gz2 = (int)((nextPosZ.z + radius + TILE_SIZE / 2) / TILE_SIZE);
+                if (gx1 >= 0 && gx2 < GRID_SIZE && map[gx1][gz].type == EMPTY && map[gx2][gz].type == EMPTY) p.position.x = nX.x;
+
+                Vector3 nZ = p.position; nZ.z += move.z;
+                int gz1 = (int)((nZ.z - radius + TILE_SIZE / 2) / TILE_SIZE);
+                int gz2 = (int)((nZ.z + radius + TILE_SIZE / 2) / TILE_SIZE);
                 int gx = (int)((p.position.x + TILE_SIZE / 2) / TILE_SIZE);
-                if (gz1 >= 0 && gz2 < GRID_SIZE && map[gx][gz1].type == EMPTY && map[gx][gz2].type == EMPTY) p.position.z = nextPosZ.z;
+                if (gz1 >= 0 && gz2 < GRID_SIZE && map[gx][gz1].type == EMPTY && map[gx][gz2].type == EMPTY) p.position.z = nZ.z;
             }
 
             int curGX = (int)((p.position.x + TILE_SIZE / 2) / TILE_SIZE);
             int curGZ = (int)((p.position.z + TILE_SIZE / 2) / TILE_SIZE);
+
             if (IsKeyPressed(place)) {
                 bool exists = false;
                 for (auto& b : bombs) if ((int)b.pos.x == curGX && (int)b.pos.y == curGZ) exists = true;
@@ -116,7 +139,10 @@ int main() {
             }
             if (IsKeyPressed(detonate)) {
                 for (auto it = bombs.begin(); it != bombs.end();) {
-                    if (it->creator == p.id) { ExecuteExplosion((int)it->pos.x, (int)it->pos.y, p.id, playerPtrs); it = bombs.erase(it); }
+                    if (it->creator == p.id) {
+                        ExecuteExplosion((int)it->pos.x, (int)it->pos.y, p.id);
+                        it = bombs.erase(it);
+                    }
                     else ++it;
                 }
             }
@@ -137,24 +163,34 @@ int main() {
         BeginDrawing();
         ClearBackground(RAYWHITE);
         BeginMode3D(camera);
+
         for (int x = 0; x < GRID_SIZE; x++) {
             for (int z = 0; z < GRID_SIZE; z++) {
                 Vector3 pos = { x * TILE_SIZE, 0, z * TILE_SIZE };
                 Color floorCol = (map[x][z].owner == PLAYER1) ? SKYBLUE : (map[x][z].owner == PLAYER2) ? PINK : LIGHTGRAY;
                 DrawCube(pos, TILE_SIZE, 0.1f, TILE_SIZE, floorCol);
                 DrawCubeWires({ pos.x, 0.1f, pos.z }, TILE_SIZE, 0.1f, TILE_SIZE, DARKGRAY);
-                if (map[x][z].type == WALL_STEEL) DrawCube({ pos.x, 1.0f, pos.z }, TILE_SIZE, 2.0f, TILE_SIZE, GRAY);
-                if (map[x][z].type == WALL_WOOD) DrawCube({ pos.x, 1.0f, pos.z }, TILE_SIZE, 2.0f, TILE_SIZE, BROWN);
+
+                if (map[x][z].type == WALL_STEEL) {
+                    DrawCube({ pos.x, 0.5f, pos.z }, TILE_SIZE, 1.0f, TILE_SIZE, GRAY);
+                    DrawPlaneTexture(metalTex, { pos.x, 1.01f, pos.z }, TILE_SIZE, TILE_SIZE, WHITE);
+                }
+                if (map[x][z].type == WALL_WOOD) {
+                    DrawCube({ pos.x, 0.5f, pos.z }, TILE_SIZE, 1.0f, TILE_SIZE, BROWN);
+                    DrawPlaneTexture(woodTex, { pos.x, 1.01f, pos.z }, TILE_SIZE, TILE_SIZE, WHITE);
+                }
             }
         }
-        for (auto& b : bombs) DrawSphere({ b.pos.x * TILE_SIZE, 0.5f, b.pos.y * TILE_SIZE }, TILE_SIZE * 0.3f, BLACK);
 
-        float pY = 0.3f; float pS = TILE_SIZE * 0.47f;
+        float bS = TILE_SIZE * 0.4f;
+        for (auto& b : bombs) DrawPlaneTexture(bombTex, { b.pos.x * TILE_SIZE, 0.15f, b.pos.y * TILE_SIZE }, bS * 2, bS * 2, WHITE);
+
+        float pY = 0.2f; float pS = TILE_SIZE * 0.47f;
         rlPushMatrix(); rlTranslatef(p1.position.x, pY, p1.position.z); rlRotatef(90, 1, 0, 0); DrawTexturePro(p1Tex, { 0, 0, (float)p1Tex.width, (float)p1Tex.height }, { -pS, -pS, pS * 2, pS * 2 }, { 0, 0 }, 0, p1.stunTimer > 0 ? YELLOW : WHITE); rlPopMatrix();
         rlPushMatrix(); rlTranslatef(p2.position.x, pY, p2.position.z); rlRotatef(90, 1, 0, 0); DrawTexturePro(p2Tex, { 0, 0, (float)p2Tex.width, (float)p2Tex.height }, { -pS, -pS, pS * 2, pS * 2 }, { 0, 0 }, 0, p2.stunTimer > 0 ? YELLOW : WHITE); rlPopMatrix();
+
         EndMode3D();
 
-        // 3. ปรับ UI Text ให้ขยับตามขอบจออัตโนมัติ
         DrawText(TextFormat("TIME: %.0f", (remainingTime > 0 ? remainingTime : 0)), GetScreenWidth() / 2 - 60, 20, 30, BLACK);
         DrawText(TextFormat("P1: %d", p1.score), 40, 20, 30, BLUE);
         DrawText(TextFormat("P2: %d", p2.score), GetScreenWidth() - 150, 20, 30, RED);
@@ -165,7 +201,9 @@ int main() {
         }
         EndDrawing();
     }
+
     UnloadTexture(p1Tex); UnloadTexture(p2Tex);
+    UnloadTexture(metalTex); UnloadTexture(woodTex); UnloadTexture(bombTex);
     CloseWindow();
     return 0;
 }

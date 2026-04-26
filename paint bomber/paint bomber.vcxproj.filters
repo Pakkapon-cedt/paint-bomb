@@ -32,5 +32,14 @@
     <Image Include="..\..\..\..\Downloads\cat.png">
       <Filter>picture</Filter>
     </Image>
+    <Image Include="..\..\..\..\Downloads\metal.png">
+      <Filter>picture</Filter>
+    </Image>
+    <Image Include="..\..\..\..\Downloads\wood.png">
+      <Filter>picture</Filter>
+    </Image>
+    <Image Include="..\..\..\..\Downloads\bomb.png">
+      <Filter>picture</Filter>
+    </Image>
   </ItemGroup>
 </Project>

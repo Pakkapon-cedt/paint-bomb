@@ -128,6 +128,10 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <Image Include="..\..\..\..\Downloads\cat.png" />
+    <Image Include="..\..\..\..\Downloads\dog.png" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\packages\raylib.5.5.0\build\native\raylib.targets" Condition="Exists('..\packages\raylib.5.5.0\build\native\raylib.targets')" />
